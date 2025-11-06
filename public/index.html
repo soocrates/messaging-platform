@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>WebSocket Chat Demo</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { font-family: sans-serif; margin: 20px; }
+    .row { margin-bottom: 10px; }
+    #log { border: 1px solid #ccc; padding: 10px; height: 320px; overflow-y: auto; background: #fafafa; }
+    .msg-user { color: #0b5; }
+    .msg-bot { color: #06c; }
+    .msg-agent { color: #a50; }
+    .msg-meta { color: #999; font-size: 12px; }
+    #sessionId, #sessionToken { width: 380px; }
+    #message { width: 380px; }
+    button { margin-left: 5px; }
+  </style>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:;">
+</head>
+<body>
+  <h2>WebSocket Chat Demo</h2>
+
+  <div class="row">
+    <label>Session ID:</label>
+    <input id="sessionId" placeholder="Leave blank for new session">
+  </div>
+  <div class="row">
+    <label>ID Token:</label>
+    <input id="idToken" placeholder="Paste Cognito ID token (optional)">
+  </div>
+  <div class="row">
+    <label>Token:</label>
+    <input id="sessionToken" placeholder="Auto-filled when new session">
+  </div>
+  <div class="row">
+    <button id="connectBtn">Connect</button>
+    <button id="disconnectBtn" disabled>Disconnect</button>
+  </div>
+
+  <div class="row">
+    <label>Message:</label>
+    <input id="message" placeholder="Type your message">
+    <button id="sendBtn" disabled>Send</button>
+  </div>
+
+  <div class="row">
+    <button id="newSessionBtn">New Session</button>
+    <button id="loadHistoryBtn" disabled>Load History</button>
+  </div>
+
+  <div id="log"></div>
+
+  <script src="./client.js"></script>
+  <script>
+    // Persist last sessionId/token locally for testing
+    (function() {
+      const sid = localStorage.getItem('sid') || '';
+      const tok = localStorage.getItem('tok') || '';
+      const idt = localStorage.getItem('idToken') || '';
+      if (sid) document.getElementById('sessionId').value = sid;
+      if (tok) document.getElementById('sessionToken').value = tok;
+      if (idt) document.getElementById('idToken').value = idt;
+    })();
+  </script>
+  </body>
+  </html>
+
