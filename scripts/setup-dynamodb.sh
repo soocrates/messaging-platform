@@ -2,7 +2,7 @@
 set -euo pipefail
 
 AWS_REGION=${AWS_REGION:-us-east-1}
-TABLE_NAME=${DYNAMO_TABLE:-ChatMessages}
+TABLE_NAME=${DYNAMO_TABLE:-ChatMessages_csas_core}
 
 aws dynamodb create-table \
   --table-name "$TABLE_NAME" \
