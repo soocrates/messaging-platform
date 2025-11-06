@@ -32,7 +32,7 @@ Secure, real-time Node.js WebSocket chat backend with DynamoDB and Postgres pers
 ## Prerequisites
 - Node.js 18+
 - Postgres (local or remote)
-- DynamoDB table (AWS or local via LocalStack/dynamodb-local)
+- DynamoDB table (existing table or create one using the setup script)
 - Optional: AWS Cognito (if `REQUIRE_AUTH=true`)
 
 ## Environment Setup
@@ -75,11 +75,12 @@ npm install
 psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDATABASE" -f scripts/setup-postgres.sql
 ```
 
-3) Create DynamoDB table (AWS CLI)
+3) Create DynamoDB table (optional - skip if you already have a table)
 ```
 chmod +x scripts/setup-dynamodb.sh
 ./scripts/setup-dynamodb.sh
 ```
+Note: Ensure your existing DynamoDB table has `sessionId` (String) as partition key and `ts` (Number) as sort key.
 
 4) Start the server
 ```
