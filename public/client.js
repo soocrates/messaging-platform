@@ -1,7 +1,7 @@
 // client.js
 
 // STEP 1: Import from your working auth-config.js file instead
-import { handleCallback, isAuthenticated, getIdToken, getLoginUrl, signOut } from './auth-config.js';
+import { handleCallback, isAuthenticated, getIdToken, getLoginUrl, signOut, parseJwt } from './auth-config.js';
 
 (() => {
   'use strict';
@@ -45,6 +45,7 @@ import { handleCallback, isAuthenticated, getIdToken, getLoginUrl, signOut } fro
     const agentCount = document.getElementById('agentCount');
     const contactMethodButtons = document.querySelectorAll('.contact-method-btn');
     const signinBtn = document.getElementById('signinBtn');
+    const authContainer = document.getElementById('authContainer');
 
     // State (no changes here)
     let selectedContactMethod = null;
@@ -91,8 +92,40 @@ import { handleCallback, isAuthenticated, getIdToken, getLoginUrl, signOut } fro
 
     // Update signin button text based on auth state (no changes here)
     function updateAuthUI() {
-      if (signinBtn) {
-        signinBtn.textContent = isAuthenticated() ? 'Sign Out' : 'Sign In';
+      if (isAuthenticated()) {
+        const token = getIdToken();
+        const payload = parseJwt(token);
+        const email = payload ? payload.email : 'My Account';
+
+        // Inject the new dropdown HTML structure
+        authContainer.innerHTML = `
+          <div class="user-dropdown">
+            <button type="button" class="user-email-button" aria-haspopup="true" aria-expanded="false">
+              <span>${email}</span>
+              <svg fill="currentColor" viewBox="0 0 20 20">
+                <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" />
+              </svg>
+            </button>
+            <div class="dropdown-menu" role="menu">
+              <button type="button" class="dropdown-item" id="signOutBtn" role="menuitem">Sign Out</button>
+            </div>
+          </div>
+        `;
+
+        // Add event listener to the sign-out button inside the dropdown
+        document.getElementById('signOutBtn').addEventListener('click', () => {
+          signOut();
+        });
+
+      } else {
+        // This part remains the same: show the sign-in button if not authenticated
+        authContainer.innerHTML = `
+          <button class="modal-signin" id="signinBtn" aria-label="Sign in">Sign In</button>
+        `;
+
+        document.getElementById('signinBtn').addEventListener('click', () => {
+          window.location.href = getLoginUrl();
+        });
       }
     }
 

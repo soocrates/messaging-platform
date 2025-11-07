@@ -60,3 +60,27 @@ export function signOut() {
   // Redirect to the Cognito logout page
   window.location.href = `${authConfig.domain}/logout?${params}`;
 }
+
+/**
+ * Parses a JWT token to extract its payload.
+ * Note: This does NOT validate the token's signature. Validation happens on the server.
+ * @param {string} token The JWT token.
+ * @returns {object|null} The decoded payload object or null if parsing fails.
+ */
+export function parseJwt(token) {
+  if (!token) {
+    return null;
+  }
+  try {
+    const base64Url = token.split('.')[1];
+    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    const jsonPayload = decodeURIComponent(atob(base64).split('').map(function(c) {
+      return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+    }).join(''));
+
+    return JSON.parse(jsonPayload);
+  } catch (e) {
+    console.error("Failed to parse JWT", e);
+    return null;
+  }
+}
