@@ -199,7 +199,7 @@ app.post('/api/auth/token', async (req, res) => {
       grant_type: 'authorization_code',
       client_id: process.env.COGNITO_CLIENT_ID,
       code: code,
-      redirect_uri: 'http://localhost:8080'
+      redirect_uri: 'http://localhost:8080/'
     });
 
     const response = await fetch(tokenEndpoint, {
@@ -532,4 +532,5 @@ runStartupChecks().finally(() => {
     logger.info('Server listening', { host: HOST, port: PORT });
   });
 });
+
 
