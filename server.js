@@ -6,6 +6,7 @@ import rateLimit from 'express-rate-limit';
 import { WebSocketServer } from 'ws';
 import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
+import fetch from 'node-fetch';
 import { fileURLToPath } from 'url';
 import Joi from 'joi';
 
@@ -16,6 +17,7 @@ import { generateBotResponse } from './modules/aws/lexConnect.js';
 import { logger } from './utils/logger.js';
 import { signSession, verifySessionSignature, isOriginAllowed } from './utils/security.js';
 import { verifyCognitoIdToken, requireAuthEnabled } from './utils/auth.js';
+import pg from 'pg';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -163,6 +165,72 @@ app.post('/api/support/questions', async (req, res) => {
   }
 });
 
+// Validate Cognito ID token (used by demo UI)
+app.post('/api/auth/validate', async (req, res) => {
+  try {
+    const { idToken } = req.body || {};
+    if (!idToken) {
+      res.status(400).json({ success: false, error: 'Missing idToken' });
+      return;
+    }
+    try {
+      const payload = await verifyCognitoIdToken(idToken);
+      res.json({ success: true, payload });
+    } catch (e) {
+      res.status(401).json({ success: false, error: e.message });
+    }
+  } catch (err) {
+    logger.error('Auth validation failed', { error: err.message });
+    res.status(500).json({ success: false, error: 'Validation error' });
+  }
+});
+
+// Exchange authorization code for tokens
+app.post('/api/auth/token', async (req, res) => {
+  try {
+    const { code } = req.body;
+    if (!code) {
+      res.status(400).json({ success: false, error: 'Missing authorization code' });
+      return;
+    }
+
+    const tokenEndpoint = `https://us-east-149cptz69g.auth.us-east-1.amazoncognito.com/oauth2/token`;
+    const params = new URLSearchParams({
+      grant_type: 'authorization_code',
+      client_id: process.env.COGNITO_CLIENT_ID,
+      code: code,
+      redirect_uri: 'http://localhost:8080'
+    });
+
+    const response = await fetch(tokenEndpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: params
+    });
+
+    const data = await response.json();
+    
+    if (!response.ok) {
+      logger.error('Token exchange failed', { error: data });
+      res.status(400).json({ success: false, error: 'Token exchange failed' });
+      return;
+    }
+
+    res.json({
+      success: true,
+      idToken: data.id_token,
+      accessToken: data.access_token,
+      refreshToken: data.refresh_token,
+      expiresIn: data.expires_in
+    });
+  } catch (err) {
+    logger.error('Token exchange error', { error: err.message });
+    res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
 // Fetch chat history
 app.get('/history/:sessionId', async (req, res) => {
   try {
@@ -201,6 +269,42 @@ app.get('/history/:sessionId', async (req, res) => {
 });
 
 const server = http.createServer(app);
+
+// Startup checks (Postgres connectivity and config logging)
+async function runStartupChecks() {
+  try {
+    logger.info('Startup configuration', {
+      requireAuth: requireAuthEnabled(),
+      cognitoPool: process.env.COGNITO_USER_POOL_ID ? 'configured' : 'missing',
+      cognitoRegion: process.env.COGNITO_REGION || process.env.AWS_REGION || 'unset',
+      dynamoTable: process.env.DYNAMO_TABLE || 'unset',
+      dynamoEndpoint: process.env.DYNAMO_ENDPOINT ? 'custom' : 'default',
+      pgHost: process.env.PGHOST || 'unset',
+      pgDatabase: process.env.PGDATABASE || 'unset'
+    });
+
+    // Test Postgres connection
+    const { Pool } = pg;
+    const pool = new Pool({
+      host: process.env.PGHOST || 'localhost',
+      port: Number(process.env.PGPORT || 5432),
+      database: process.env.PGDATABASE || 'chatdb',
+      user: process.env.PGUSER || 'chatuser',
+      password: process.env.PGPASSWORD || '',
+      ssl: process.env.PGSSL === 'true'
+    });
+    try {
+      await pool.query('SELECT 1');
+      logger.info('Postgres connectivity check passed');
+    } catch (err) {
+      logger.error('Postgres connectivity check failed', { error: err.message });
+    } finally {
+      await pool.end();
+    }
+  } catch (err) {
+    logger.error('Startup checks failed', { error: err.message });
+  }
+}
 
 // WebSocket server with payload cap
 const wss = new WebSocketServer({ server, maxPayload: 256 * 1024 });
@@ -302,6 +406,7 @@ wss.on('connection', async (ws, req) => {
     // Origin check
     const origin = req.headers.origin || '';
     if (!isOriginAllowed(origin)) {
+      logger.warn('Connection refused - origin not allowed', { origin, remoteAddress: req.socket.remoteAddress });
       ws.close(1008, 'Origin not allowed');
       return;
     }
@@ -319,6 +424,7 @@ wss.on('connection', async (ws, req) => {
       try {
         await verifyCognitoIdToken(idToken || '');
       } catch (e) {
+        logger.warn('Connection refused - authentication failed', { error: e.message, hasIdToken: !!idToken });
         ws.close(1008, 'Authentication required');
         return;
       }
@@ -332,6 +438,7 @@ wss.on('connection', async (ws, req) => {
     } else {
       // If sessionId provided, verify token
       if (!verifySessionSignature(sessionId, token)) {
+        logger.warn('Connection refused - invalid session token', { sessionId });
         ws.close(1008, 'Invalid session token');
         return;
       }
@@ -419,7 +526,10 @@ wss.on('connection', async (ws, req) => {
   }
 });
 
-server.listen(PORT, HOST, () => {
-  logger.info('Server listening', { host: HOST, port: PORT });
+// Run startup checks then start server
+runStartupChecks().finally(() => {
+  server.listen(PORT, HOST, () => {
+    logger.info('Server listening', { host: HOST, port: PORT });
+  });
 });
 

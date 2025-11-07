@@ -1,5 +1,15 @@
+import { getLoginUrl, handleCallback, isAuthenticated, getIdToken, signOut } from './auth-config.js';
+
 (() => {
   'use strict';
+
+  // Handle Cognito callback on page load
+  if (window.location.hash && window.location.hash.includes('id_token=')) {
+    const success = handleCallback();
+    if (success) {
+      console.log('Successfully authenticated');
+    }
+  }
 
   // Wait for DOM to be ready
   if (document.readyState === 'loading') {
@@ -24,6 +34,7 @@
     const emailCallText = document.getElementById('emailCallText');
     const agentCount = document.getElementById('agentCount');
     const contactMethodButtons = document.querySelectorAll('.contact-method-btn');
+  const signinBtn = document.getElementById('signinBtn');
 
     // Check if all required elements exist with detailed logging
     if (!supportButton || !modalOverlay || !closeModal) {
@@ -41,6 +52,7 @@
     let sessionId = null;
     let sessionToken = null;
     let currentCaseId = null;
+  let lastQuestions = [];
 
     // Fetch agent availability
     async function updateAgentAvailability() {
@@ -65,6 +77,28 @@
       showContactMethodSelection();
       updateAgentAvailability();
     });
+
+    // Sign-in button redirects to Cognito Hosted UI
+    if (signinBtn) {
+      signinBtn.addEventListener('click', () => {
+        window.location.href = getLoginUrl();
+      });
+    }
+
+    // Update signin button text based on auth state
+    function updateAuthUI() {
+      if (signinBtn) {
+        signinBtn.textContent = isAuthenticated() ? 'Sign Out' : 'Sign In';
+        if (isAuthenticated()) {
+          signinBtn.addEventListener('click', signOut);
+        } else {
+          signinBtn.addEventListener('click', () => window.location.href = getLoginUrl());
+        }
+      }
+    }
+
+    // Update UI on load
+    updateAuthUI();
 
     // Close Modal
     const closeModalFunc = () => {
@@ -162,6 +196,8 @@
 
     // Initialize Chat
     async function initChat(questions) {
+      // remember questions so we can retry connecting after auth
+      lastQuestions = questions || [];
       stepContactMethod.style.display = 'none';
       stepEmailCall.classList.remove('active');
       stepChat.classList.add('active');
@@ -170,7 +206,10 @@
 
       // Connect to WebSocket
       const base = location.origin.replace(/^http/, 'ws');
-      const qp = new URLSearchParams();
+  const qp = new URLSearchParams();
+  // If user has Cognito ID token, include it in the connect query so server can verify
+  const idToken = await getIdTokenFromUser();
+  if (idToken) qp.set('idToken', idToken);
       if (sessionId) {
         qp.set('sessionId', sessionId);
         if (sessionToken) qp.set('token', sessionToken);
@@ -180,7 +219,7 @@
       ws = new WebSocket(url);
 
       ws.onopen = () => {
-        console.log('WebSocket connected');
+        console.log('WebSocket connected', { url });
       };
 
       ws.onmessage = (ev) => {
@@ -219,8 +258,28 @@
         }
       };
 
-      ws.onclose = () => {
-        console.log('WebSocket disconnected');
+      ws.onclose = async (ev) => {
+        try {
+          console.log('WebSocket disconnected', { code: ev.code, reason: ev.reason, wasClean: ev.wasClean });
+        } catch (e) {
+          console.log('WebSocket disconnected');
+        }
+
+        // If server rejected connection for authentication (policy / auth), prompt user to provide token and retry
+        try {
+          if (ev && ev.code === 1008) {
+            addMessageToChat('agent', 'Connection rejected by server (authentication required). Please provide your Cognito ID token.', Date.now());
+            // remove any cached token and ask user
+            localStorage.removeItem('cognitoIdToken');
+            const newToken = await getIdTokenFromUser();
+            if (newToken) {
+              // attempt reconnect with same questions
+              setTimeout(() => initChat(lastQuestions), 400);
+            }
+          }
+        } catch (e) {
+          // ignore
+        }
       };
 
       ws.onerror = (err) => {
@@ -235,6 +294,11 @@
         sessionId = savedSessionId;
         sessionToken = savedToken;
       }
+    }
+
+    // Get Cognito ID token
+    async function getIdTokenFromUser() {
+      return getIdToken();
     }
 
     // Add message to chat
@@ -270,7 +334,17 @@
     // Send chat message
     function sendChatMessage() {
       const content = chatInput.value.trim();
-      if (!content || !ws || ws.readyState !== WebSocket.OPEN) return;
+      if (!content) return;
+      if (!ws) {
+        console.warn('WebSocket not initialized, cannot send message');
+        addMessageToChat('agent', 'Connection not established. Please re-open the chat.', Date.now());
+        return;
+      }
+      if (ws.readyState !== WebSocket.OPEN) {
+        console.warn('WebSocket not open, readyState=', ws.readyState);
+        addMessageToChat('agent', 'Connection closed. Please re-open the chat.', Date.now());
+        return;
+      }
 
       // Add user message to UI
       addMessageToChat('user', content, Date.now());

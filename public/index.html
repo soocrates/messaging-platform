@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <title>Support Widget</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:;">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' https://*.amazoncognito.com; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss: https://*.amazoncognito.com;">
   <style>
     * {
       margin: 0;
@@ -153,6 +153,21 @@
 
     .modal-close:hover {
       background: rgba(255, 255, 255, 0.3);
+    }
+
+    .modal-signin {
+      background: rgba(255,255,255,0.12);
+      border: none;
+      color: white;
+      padding: 6px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      margin-right: 8px;
+      font-size: 13px;
+    }
+
+    .modal-signin:hover {
+      background: rgba(255,255,255,0.18);
     }
 
     .modal-body {
@@ -464,6 +479,7 @@
             <span id="agentCount">(3 agents online)</span>
           </div>
         </div>
+        <button class="modal-signin" id="signinBtn" aria-label="Sign in">Sign in</button>
         <button class="modal-close" id="closeModal" aria-label="Close">×</button>
       </div>
       <div class="modal-body">
@@ -532,6 +548,6 @@
     </div>
   </div>
 
-  <script src="/client.js" type="text/javascript" defer></script>
+  <script src="/client.js" type="module" defer></script>
 </body>
 </html>
