@@ -1,12 +1,15 @@
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, PutCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
+import { fromIni } from '@aws-sdk/credential-provider-ini';
 
 const region = process.env.AWS_REGION || 'us-east-1';
-const tableName = process.env.DYNAMO_TABLE || 'ChatMessages';
+const tableName = process.env.DYNAMO_TABLE || 'ChatMessages_csas_core';
 
 const clientConfig = { region };
-if (process.env.DYNAMO_ENDPOINT) {
-  clientConfig.endpoint = process.env.DYNAMO_ENDPOINT;
+
+if (process.env.AWS_PROFILE) {
+  clientConfig.credentials = fromIni({ profile: process.env.AWS_PROFILE });
+  console.log(`👤 Using AWS CLI profile: ${process.env.AWS_PROFILE}`);
 }
 const ddb = new DynamoDBClient(clientConfig);
 const docClient = DynamoDBDocumentClient.from(ddb);
