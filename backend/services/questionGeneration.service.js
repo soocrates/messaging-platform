@@ -2,13 +2,13 @@ import { getHistoryForSession } from '../../modules/db/index.js';
 import { getCasesByStatus } from '../../modules/db/supportCases.js';
 import { logger } from '../../utils/logger.js';
 
-export async function generateContextualQuestions(contactMethod, userSessionId) {
+export async function generateContextualQuestions(contactMethod, userEmail) {
   const questions = [];
 
   // If user has previous session, analyze their history
-  if (userSessionId) {
+  if (userEmail) {
     try {
-      const history = await getHistoryForSession(userSessionId, 50);
+      const history = await getHistoryForSession(userEmail, 50);
       
       // Analyze previous conversations
       const recentMessages = history.slice(-10);
@@ -51,7 +51,7 @@ export async function generateContextualQuestions(contactMethod, userSessionId) 
 
       // Check for recent support cases
       const recentCases = await getCasesByStatus('open');
-      const userCases = recentCases.filter(c => c.user_session_id === userSessionId);
+      const userCases = recentCases.filter(c => c.userEmail === userEmail);
       
       if (userCases.length > 0) {
         questions.push(`I notice you have ${userCases.length} open case(s). Is this related to any of them?`);

@@ -36,10 +36,15 @@ export async function handleConnection(ws, req) {
     const token = url.searchParams.get('token');
     const idToken = url.searchParams.get('idToken');
 
-    // Optionally require Cognito auth
+    // Extract user email from token
+    let userEmail = 'anonymous@system.local'; // Default for unauthenticated
+    let cognitoPayload = null;
+
     if (requireAuthEnabled()) {
       try {
-        await verifyCognitoIdToken(idToken || '');
+        cognitoPayload = await verifyCognitoIdToken(idToken || '');
+        userEmail = cognitoPayload.email || cognitoPayload['cognito:username'] || cognitoPayload.sub;
+        logger.info('User authenticated', { email: userEmail });
       } catch (e) {
         logger.warn('Connection refused - authentication failed', { 
           error: e.message, 
@@ -48,7 +53,7 @@ export async function handleConnection(ws, req) {
         ws.close(1008, 'Authentication required');
         return;
       }
-    }
+    } 
 
     // New session if no sessionId provided
     if (!sessionId) {
@@ -68,18 +73,22 @@ export async function handleConnection(ws, req) {
     attachSocketToSession(sessionId, ws);
     logger.info('Client connected', { sessionId });
 
+    // Storing user email in WebSocket object
+    ws.userEmail = userEmail;
+    ws.sessionId = sessionId;
+
     // Send hello + session ID/token and initial history
     (async () => {
       const sig = signSession(sessionId);
       setSessionToken(sessionId, sig);
-      ws.send(JSON.stringify({ type: 'session', sessionId, token: sig }));
+      ws.send(JSON.stringify({ type: 'session', sessionId, token: sig, userEmail }));
       const history = await getHistoryForSession(sessionId, 200);
       ws.send(JSON.stringify({ type: 'history', sessionId, history }));
     })().catch((err) => logger.error('Initial history send error', { error: err.message }));
 
-    ws.on('message', (raw) => handleMessage(ws, raw, sessionId));
-    ws.on('close', () => handleClose(sessionId));
-    ws.on('error', (err) => handleError(err, sessionId));
+    ws.on('message', (raw) => handleMessage(ws, raw, sessionId, userEmail));
+    ws.on('close', () => handleClose(sessionId, userEmail));
+    ws.on('error', (err) => handleError(err, sessionId, userEmail));
   } catch (err) {
     logger.error('Connection error', { error: err.message });
     try {
@@ -89,7 +98,7 @@ export async function handleConnection(ws, req) {
   }
 }
 
-async function handleMessage(ws, raw, sessionId) {
+async function handleMessage(ws, raw, sessionId, userEmail) {
   let msg;
   try {
     // Quick size guard
@@ -118,7 +127,7 @@ async function handleMessage(ws, raw, sessionId) {
 
   if (msg.type === 'message') {
     const content = String(msg.content || '').trim();
-    const userMessage = { sessionId, sender: 'user', content, timestamp: now };
+    const userMessage = { sessionId, sender: userEmail, content, timestamp: now };
 
     try {
       await saveMessage(userMessage);
@@ -138,7 +147,7 @@ async function handleMessage(ws, raw, sessionId) {
         s.ws.send(JSON.stringify({ type: 'message', ...botMessage }));
       }
     } catch (err) {
-      logger.error('Message handling error', { sessionId, error: err.message });
+      logger.error('Message handling error', { sessionId,userEmail, error: err.message });
       ws.send(JSON.stringify({ type: 'error', message: 'Failed to process message' }));
     }
   } else if (msg.type === 'ping') {
@@ -147,10 +156,10 @@ async function handleMessage(ws, raw, sessionId) {
 }
 
 function handleClose(sessionId) {
-  logger.info('Client disconnected', { sessionId });
+  logger.info('Client disconnected', { sessionId, userEmail });
   removeSession(sessionId);
 }
 
 function handleError(err, sessionId) {
-  logger.error('WebSocket error', { sessionId, error: err.message });
+  logger.error('WebSocket error', { sessionId,userEmail, error: err.message });
 }

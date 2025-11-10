@@ -17,7 +17,7 @@ export async function createSupportCase(caseData) {
   const text = `
     INSERT INTO support_cases (
       case_id, help_type, service, category, severity, 
-      subject, description, contact_method, user_session_id, status
+      subject, description, contact_method, userEmail, status
     )
     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'open')
     RETURNING *
