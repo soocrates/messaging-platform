@@ -156,10 +156,10 @@ async function handleMessage(ws, raw, sessionId, userEmail) {
 }
 
 function handleClose(sessionId) {
-  logger.info('Client disconnected', { sessionId, userEmail });
+  logger.info('Client disconnected', { sessionId });
   removeSession(sessionId);
 }
 
 function handleError(err, sessionId) {
-  logger.error('WebSocket error', { sessionId,userEmail, error: err.message });
+  logger.error('WebSocket error', { sessionId, error: err.message });
 }

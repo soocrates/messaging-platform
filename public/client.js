@@ -1,27 +1,24 @@
 // client.js
-
-// STEP 1: Import from your working auth-config.js file instead
 import { handleCallback, isAuthenticated, getIdToken, getLoginUrl, signOut, parseJwt } from './auth-config.js';
 
 (() => {
   'use strict';
 
-  // Handle Cognito callback on page load (authorization code flow)
-  if (window.location.search && window.location.search.includes('code=')) {
-    handleCallback().then((success) => {
-      if (success) {
-        console.log('Successfully authenticated via authorization code');
-        // Refresh UI elements that depend on auth
-        try { updateAuthUI(); } catch (e) { /* ignore */ }
-      } else {
-        console.warn('Authentication callback did not return tokens');
-      }
-    }).catch((err) => {
-      console.error('Error handling auth callback', err);
-    });
+  // Handle Cognito callback on page load
+  if (window.location.search?.includes('code=')) {
+    handleCallback()
+      .then((success) => {
+        if (success) {
+          console.log('Successfully authenticated via authorization code');
+          updateAuthUI();
+        } else {
+          console.warn('Authentication callback did not return tokens');
+        }
+      })
+      .catch((err) => console.error('Error handling auth callback', err));
   }
 
-  // Wait for DOM to be ready
+  // Initialize when DOM is ready
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
   } else {
@@ -29,80 +26,151 @@ import { handleCallback, isAuthenticated, getIdToken, getLoginUrl, signOut, pars
   }
 
   function init() {
-    // DOM Elements (no changes here)
-    const supportButton = document.getElementById('supportButton');
-    const modalOverlay = document.getElementById('modalOverlay');
-    const closeModal = document.getElementById('closeModal');
-    const modalTitle = document.getElementById('modalTitle');
-    const stepContactMethod = document.getElementById('stepContactMethod');
-    const stepChat = document.getElementById('stepChat');
-    const stepEmailCall = document.getElementById('stepEmailCall');
-    const chatMessages = document.getElementById('chatMessages');
-    const chatInput = document.getElementById('chatInput');
-    const chatSendBtn = document.getElementById('chatSendBtn');
-    const emailCallMessage = document.getElementById('emailCallMessage');
-    const emailCallText = document.getElementById('emailCallText');
-    const agentCount = document.getElementById('agentCount');
-    const contactMethodButtons = document.querySelectorAll('.contact-method-btn');
-    const signinBtn = document.getElementById('signinBtn');
-    const authContainer = document.getElementById('authContainer');
+    // Cache DOM elements
+    const elements = {
+      supportButton: document.getElementById('supportButton'),
+      modalOverlay: document.getElementById('modalOverlay'),
+      closeModal: document.getElementById('closeModal'),
+      modalTitle: document.getElementById('modalTitle'),
+      sidebar: document.getElementById('sidebar'),
+      sidebarToggleBtn: document.getElementById('sidebarToggleBtn'),
+      stepContactMethod: document.getElementById('stepContactMethod'),
+      stepChat: document.getElementById('stepChat'),
+      stepEmailCall: document.getElementById('stepEmailCall'),
+      chatMessages: document.getElementById('chatMessages'),
+      chatInput: document.getElementById('chatInput'),
+      chatSendBtn: document.getElementById('chatSendBtn'),
+      emailCallText: document.getElementById('emailCallText'),
+      agentCount: document.getElementById('agentCount'),
+      authContainer: document.getElementById('authContainer'),
+      newCaseBtn: document.getElementById('newCaseBtn'),
+      viewAllCasesBtn: document.getElementById('viewAllCasesBtn'),
+      faqBtn: document.getElementById('faqBtn'),
+      recentCasesList: document.getElementById('recentCasesList'),
+      contactMethodButtons: document.querySelectorAll('.contact-method-btn')
+    };
 
-    // State (no changes here)
-    let selectedContactMethod = null;
-    let ws = null;
-    let sessionId = null;
-    let sessionToken = null;
-    let currentCaseId = null;
-    let lastQuestions = [];
+    // Application state
+    const state = {
+      selectedContactMethod: null,
+      ws: null,
+      sessionId: localStorage.getItem('supportSessionId') || null,
+      sessionToken: localStorage.getItem('supportSessionToken') || null,
+      currentCaseId: null,
+      lastQuestions: []
+    };
 
-    // Fetch agent availability (no changes here)
+    // Initialize
+    updateAuthUI();
+    updateAgentAvailability();
+    setInterval(updateAgentAvailability, 30000);
+
+    // Event Listeners
+    elements.supportButton.addEventListener('click', openModal);
+    elements.closeModal.addEventListener('click', closeModal);
+    elements.modalOverlay.addEventListener('click', handleOverlayClick);
+    elements.sidebarToggleBtn.addEventListener('click', toggleSidebar);
+    elements.newCaseBtn.addEventListener('click', handleNewCase);
+    elements.viewAllCasesBtn.addEventListener('click', handleViewAllCases);
+    elements.faqBtn.addEventListener('click', handleFAQ);
+    elements.chatSendBtn.addEventListener('click', sendChatMessage);
+    elements.chatInput.addEventListener('keydown', handleChatInputKeydown);
+    elements.recentCasesList.addEventListener('click', handleCaseClick);
+    elements.contactMethodButtons.forEach(btn => {
+      btn.addEventListener('click', () => handleContactMethodClick(btn));
+    });
+
+    document.addEventListener('keydown', handleEscapeKey);
+
+    // ===== Functions =====
+
+    // Agent Availability
     async function updateAgentAvailability() {
       try {
         const res = await fetch('/api/agents/online');
         const data = await res.json();
-        if (agentCount) {
-          agentCount.textContent = `(${data.count} agents online)`;
+        if (elements.agentCount) {
+          elements.agentCount.textContent = `${data.count} agents online`;
         }
       } catch (err) {
         console.error('Failed to fetch agent availability', err);
       }
     }
-    updateAgentAvailability();
-    setInterval(updateAgentAvailability, 30000);
 
-    // Open Modal (no changes here)
-    supportButton.addEventListener('click', () => {
-      modalOverlay.classList.add('active');
+    // Modal Management
+    function openModal() {
+      elements.modalOverlay.classList.add('active');
       showContactMethodSelection();
       updateAgentAvailability();
-    });
-
-    // STEP 2: Update the sign-in button logic
-    if (signinBtn) {
-      signinBtn.addEventListener('click', () => {
-        if (isAuthenticated()) {
-          // If logged in, sign out
-          signOut();
-        } else {
-          // If logged out, redirect to the Cognito login page
-          window.location.href = getLoginUrl();
-        }
-      });
     }
 
-    // Update signin button text based on auth state (no changes here)
+    function closeModal() {
+      elements.modalOverlay.classList.remove('active');
+      if (state.ws?.readyState === WebSocket.OPEN) {
+        state.ws.close();
+      }
+      resetToContactSelection();
+    }
+
+    function handleOverlayClick(e) {
+      if (e.target === elements.modalOverlay) {
+        closeModal();
+      }
+    }
+
+    function handleEscapeKey(e) {
+      if (e.key === 'Escape' && elements.modalOverlay.classList.contains('active')) {
+        closeModal();
+      }
+    }
+
+    // Sidebar Management
+    function toggleSidebar() {
+      elements.sidebar.classList.toggle('collapsed');
+    }
+
+    function handleNewCase() {
+      showContactMethodSelection();
+    }
+
+    function handleViewAllCases() {
+      console.log('View All Cases clicked');
+      alert('View All Cases feature coming soon!');
+    }
+
+    function handleFAQ() {
+      console.log('FAQ clicked');
+      alert('FAQ feature coming soon!');
+    }
+
+    function handleCaseClick(e) {
+      const caseItem = e.target.closest('li[data-caseid]');
+      if (!caseItem) return;
+
+      const caseId = caseItem.dataset.caseid;
+      console.log('Loading case:', caseId);
+      
+      // Switch to chat view and load case
+      elements.stepContactMethod.style.display = 'none';
+      elements.stepEmailCall.classList.remove('active');
+      elements.stepChat.classList.add('active');
+      elements.modalTitle.textContent = 'Support Case';
+      elements.chatMessages.innerHTML = '';
+      addMessageToChat('agent', `Loaded previous chat for ${caseId}`, Date.now());
+    }
+
+    // Authentication UI
     function updateAuthUI() {
       if (isAuthenticated()) {
         const token = getIdToken();
         const payload = parseJwt(token);
-        const email = payload ? payload.email : 'My Account';
+        const email = payload?.email || 'My Account';
 
-        // Inject the new dropdown HTML structure
-        authContainer.innerHTML = `
+        elements.authContainer.innerHTML = `
           <div class="user-dropdown">
             <button type="button" class="user-email-button" aria-haspopup="true" aria-expanded="false">
-              <span>${email}</span>
-              <svg fill="currentColor" viewBox="0 0 20 20">
+              <span>${escapeHtml(email)}</span>
+              <svg fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
                 <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" />
               </svg>
             </button>
@@ -112,81 +180,52 @@ import { handleCallback, isAuthenticated, getIdToken, getLoginUrl, signOut, pars
           </div>
         `;
 
-        // Add event listener to the sign-out button inside the dropdown
-        document.getElementById('signOutBtn').addEventListener('click', () => {
-          signOut();
-        });
-
+        document.getElementById('signOutBtn')?.addEventListener('click', () => signOut());
       } else {
-        // This part remains the same: show the sign-in button if not authenticated
-        authContainer.innerHTML = `
+        elements.authContainer.innerHTML = `
           <button class="modal-signin" id="signinBtn" aria-label="Sign in">Sign In</button>
         `;
 
-        document.getElementById('signinBtn').addEventListener('click', () => {
+        document.getElementById('signinBtn')?.addEventListener('click', () => {
           window.location.href = getLoginUrl();
         });
       }
     }
 
-    // Update UI on load
-    updateAuthUI();
-    // STEP 3: Remove the userManager event listeners as they no longer exist
-    // userManager.events.addUserLoaded(() => updateAuthUI());
-    // userManager.events.addUserUnloaded(() => updateAuthUI());
-
-
-    // Close Modal (no changes here)
-    const closeModalFunc = () => {
-      modalOverlay.classList.remove('active');
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.close();
-      }
-      resetToContactSelection();
-    };
-    closeModal.addEventListener('click', closeModalFunc);
-    modalOverlay.addEventListener('click', (e) => {
-      if (e.target === modalOverlay) {
-        closeModalFunc();
-      }
-    });
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && modalOverlay.classList.contains('active')) {
-        closeModalFunc();
-      }
-    });
-
-    // Contact Method Selection (no changes here)
-    contactMethodButtons.forEach(btn => {
-      btn.addEventListener('click', async () => {
-        selectedContactMethod = btn.dataset.method;
-        contactMethodButtons.forEach(b => b.classList.remove('selected'));
-        btn.classList.add('selected');
-        showLoading();
-        try {
-          const questions = await getContextualQuestions(selectedContactMethod);
-          if (selectedContactMethod === 'chat') {
-            await initChat(questions);
-          } else {
-            showEmailCall(selectedContactMethod, questions);
-          }
-        } catch (err) {
-          console.error('Failed to initialize contact method', err);
-          alert('Failed to initialize. Please try again.');
-          showContactMethodSelection();
+    // Contact Method Selection
+    async function handleContactMethodClick(btn) {
+      state.selectedContactMethod = btn.dataset.method;
+      elements.contactMethodButtons.forEach(b => b.classList.remove('selected'));
+      btn.classList.add('selected');
+      
+      showLoading();
+      
+      try {
+        const questions = await getContextualQuestions(state.selectedContactMethod);
+        if (state.selectedContactMethod === 'chat') {
+          await initChat(questions);
+        } else {
+          showEmailCall(state.selectedContactMethod, questions);
         }
-      });
-    });
+      } catch (err) {
+        console.error('Failed to initialize contact method', err);
+        alert('Failed to initialize. Please try again.');
+        showContactMethodSelection();
+      }
+    }
 
-    // Get contextual questions from backend (no changes here)
+    // Contextual Questions
     async function getContextualQuestions(contactMethod) {
       try {
-        const savedSessionId = localStorage.getItem('supportSessionId');
         const res = await fetch('/api/support/questions', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ contactMethod, userSessionId: sessionId || savedSessionId || null })
+          body: JSON.stringify({ 
+            contactMethod, 
+            userSessionId: state.sessionId 
+          })
         });
+        
         if (!res.ok) throw new Error('Failed to get questions');
         const data = await res.json();
         return data.questions || [];
@@ -196,135 +235,167 @@ import { handleCallback, isAuthenticated, getIdToken, getLoginUrl, signOut, pars
       }
     }
 
-    // Default questions if backend fails (no changes here)
     function getDefaultQuestions(contactMethod) {
       if (contactMethod === 'chat') {
-        return ['How can we help you today?', 'What service or feature are you having issues with?', 'Can you describe the problem in more detail?'];
+        return [
+          'How can we help you today?',
+          'What service or feature are you having issues with?',
+          'Can you describe the problem in more detail?'
+        ];
       }
       return [];
     }
 
-    // Initialize Chat
-    async function initChat(questions) {
-      lastQuestions = questions || [];
-      stepContactMethod.style.display = 'none';
-      stepEmailCall.classList.remove('active');
-      stepChat.classList.add('active');
-      modalTitle.textContent = 'Chat Support';
-      chatMessages.innerHTML = '';
+    // Chat Initialization
+    async function initChat(questions = []) {
+      state.lastQuestions = questions;
+      elements.stepContactMethod.style.display = 'none';
+      elements.stepEmailCall.classList.remove('active');
+      elements.stepChat.classList.add('active');
+      elements.modalTitle.textContent = 'Chat Support';
+      elements.chatMessages.innerHTML = '';
 
       const base = location.origin.replace(/^http/, 'ws');
       const qp = new URLSearchParams();
       
-      // STEP 4: Use your simple getIdToken function
       const idToken = getIdToken();
       if (idToken) qp.set('idToken', idToken);
-
-      if (sessionId) {
-        qp.set('sessionId', sessionId);
-        if (sessionToken) qp.set('token', sessionToken);
+      if (state.sessionId) {
+        qp.set('sessionId', state.sessionId);
+        if (state.sessionToken) qp.set('token', state.sessionToken);
       }
+      
       const url = qp.toString() ? `${base}/?${qp}` : `${base}/`;
 
-      ws = new WebSocket(url);
+      state.ws = new WebSocket(url);
 
-      ws.onopen = () => console.log('WebSocket connected', { url });
+      state.ws.onopen = () => console.log('WebSocket connected', { url });
 
-      ws.onmessage = (ev) => {
+      state.ws.onmessage = (ev) => {
         try {
           const data = JSON.parse(ev.data);
-          if (data.type === 'session') {
-            sessionId = data.sessionId;
-            sessionToken = data.token;
-            localStorage.setItem('supportSessionId', sessionId);
-            localStorage.setItem('supportSessionToken', sessionToken);
-          } else if (data.type === 'history') {
-            if (data.history && data.history.length > 0) {
-              data.history.forEach(msg => addMessageToChat(msg.sender, msg.content, msg.timestamp));
-            }
-            if (questions.length > 0) {
-              setTimeout(() => {
-                questions.forEach((q, idx) => setTimeout(() => addMessageToChat('agent', q, Date.now()), idx * 1500));
-              }, 500);
-            }
-          } else if (data.type === 'message') {
-            addMessageToChat(data.sender, data.content, data.timestamp);
-          } else if (data.type === 'error') {
-            addMessageToChat('agent', 'Sorry, there was an error. Please try again.', Date.now());
-          }
+          handleWebSocketMessage(data, questions);
         } catch (err) {
           console.error('Failed to parse WebSocket message', err);
         }
       };
 
-      ws.onclose = (ev) => {
-        console.log('WebSocket disconnected', { code: ev.code, reason: ev.reason, wasClean: ev.wasClean });
-        if (ev && ev.code === 1008) {
-          addMessageToChat('agent', 'Connection rejected by server (authentication required). Please sign in and try again.', Date.now());
-          localStorage.removeItem('cognitoIdToken'); // Clear potentially bad token
+      state.ws.onclose = (ev) => {
+        console.log('WebSocket disconnected', { 
+          code: ev.code, 
+          reason: ev.reason, 
+          wasClean: ev.wasClean 
+        });
+        
+        if (ev.code === 1008) {
+          addMessageToChat(
+            'agent', 
+            'Connection rejected by server (authentication required). Please sign in and try again.', 
+            Date.now()
+          );
+          localStorage.removeItem('cognitoIdToken');
           updateAuthUI();
         }
       };
 
-      ws.onerror = (err) => {
+      state.ws.onerror = (err) => {
         console.error('WebSocket error', err);
         addMessageToChat('agent', 'Connection error. Please refresh and try again.', Date.now());
       };
+    }
 
-      const savedSessionId = localStorage.getItem('supportSessionId');
-      const savedToken = localStorage.getItem('supportSessionToken');
-      if (savedSessionId && savedToken) {
-        sessionId = savedSessionId;
-        sessionToken = savedToken;
+    function handleWebSocketMessage(data, questions) {
+      switch (data.type) {
+        case 'session':
+          state.sessionId = data.sessionId;
+          state.sessionToken = data.token;
+          localStorage.setItem('supportSessionId', state.sessionId);
+          localStorage.setItem('supportSessionToken', state.sessionToken);
+          break;
+
+        case 'history':
+          if (data.history?.length > 0) {
+            data.history.forEach(msg => 
+              addMessageToChat(msg.sender, msg.content, msg.timestamp)
+            );
+          }
+          if (questions.length > 0) {
+            setTimeout(() => {
+              questions.forEach((q, idx) => 
+                setTimeout(() => addMessageToChat('agent', q, Date.now()), idx * 1500)
+              );
+            }, 500);
+          }
+          break;
+
+        case 'message':
+          addMessageToChat(data.sender, data.content, data.timestamp);
+          break;
+
+        case 'error':
+          addMessageToChat('agent', 'Sorry, there was an error. Please try again.', Date.now());
+          break;
       }
     }
 
-    // Remaining functions (addMessageToChat, sendChatMessage, etc.) have no changes
+    // Chat Messages
     function addMessageToChat(sender, content, timestamp) {
       const messageDiv = document.createElement('div');
       messageDiv.className = `message ${sender}`;
+
       const avatar = document.createElement('div');
       avatar.className = 'message-avatar';
       avatar.textContent = sender === 'agent' ? 'A' : 'U';
+
       const contentDiv = document.createElement('div');
       contentDiv.className = 'message-content';
+
       const bubble = document.createElement('div');
       bubble.className = 'message-bubble';
       bubble.textContent = content;
+
       const time = document.createElement('div');
       time.className = 'message-time';
       const date = new Date(timestamp);
       time.textContent = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
       contentDiv.appendChild(bubble);
       contentDiv.appendChild(time);
       messageDiv.appendChild(avatar);
       messageDiv.appendChild(contentDiv);
-      chatMessages.appendChild(messageDiv);
-      chatMessages.scrollTop = chatMessages.scrollHeight;
+      elements.chatMessages.appendChild(messageDiv);
+      elements.chatMessages.scrollTop = elements.chatMessages.scrollHeight;
     }
 
     function sendChatMessage() {
-      const content = chatInput.value.trim();
-      if (!content || !ws) return;
-      if (ws.readyState !== WebSocket.OPEN) {
+      const content = elements.chatInput.value.trim();
+      if (!content || !state.ws) return;
+
+      if (state.ws.readyState !== WebSocket.OPEN) {
         addMessageToChat('agent', 'Connection closed. Please re-open the chat.', Date.now());
         return;
       }
-      addMessageToChat('user', content, Date.now());
-      ws.send(JSON.stringify({ type: 'message', content }));
-      chatInput.value = '';
-      chatInput.focus();
-    }
-    chatSendBtn.addEventListener('click', sendChatMessage);
-    chatInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') sendChatMessage();
-    });
 
+      addMessageToChat('user', content, Date.now());
+      state.ws.send(JSON.stringify({ type: 'message', content }));
+      elements.chatInput.value = '';
+      elements.chatInput.focus();
+    }
+
+    function handleChatInputKeydown(e) {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        sendChatMessage();
+      }
+    }
+
+    // Email/Call Support
     async function showEmailCall(method) {
-      stepContactMethod.style.display = 'none';
-      stepChat.classList.remove('active');
-      stepEmailCall.classList.add('active');
-      modalTitle.textContent = method === 'email' ? 'Email Support' : 'Call Support';
+      elements.stepContactMethod.style.display = 'none';
+      elements.stepChat.classList.remove('active');
+      elements.stepEmailCall.classList.add('active');
+      elements.modalTitle.textContent = method === 'email' ? 'Email Support' : 'Call Support';
+
       try {
         const res = await fetch('/api/support/cases', {
           method: 'POST',
@@ -336,43 +407,52 @@ import { handleCallback, isAuthenticated, getIdToken, getLoginUrl, signOut, pars
             category: 'Support Request',
             severity: 'medium',
             subject: `${method === 'email' ? 'Email' : 'Call'} Support Request`,
-            description: 'User requested support via ' + method
+            description: `User requested support via ${method}`
           })
         });
+
         const result = await res.json();
         if (result.success) {
-          currentCaseId = result.caseId;
-          emailCallText.textContent = method === 'email'
+          state.currentCaseId = result.caseId;
+          elements.emailCallText.textContent = method === 'email'
             ? `An agent will contact you via email shortly. Case ID: ${result.caseId}`
             : `An agent will call you shortly. Case ID: ${result.caseId}`;
         }
       } catch (err) {
         console.error('Failed to create support case', err);
-        emailCallText.textContent = 'Your request has been received. An agent will contact you shortly.';
+        elements.emailCallText.textContent = 'Your request has been received. An agent will contact you shortly.';
       }
     }
 
+    // View Management
     function showLoading() {
-      stepContactMethod.style.display = 'none';
-      stepChat.classList.remove('active');
-      stepEmailCall.classList.remove('active');
+      elements.stepContactMethod.style.display = 'none';
+      elements.stepChat.classList.remove('active');
+      elements.stepEmailCall.classList.remove('active');
     }
 
     function showContactMethodSelection() {
-      stepContactMethod.style.display = 'flex';
-      stepChat.classList.remove('active');
-      stepEmailCall.classList.remove('active');
-      modalTitle.textContent = 'Support';
-      contactMethodButtons.forEach(b => b.classList.remove('selected'));
-      selectedContactMethod = null;
+      elements.stepContactMethod.style.display = 'block';
+      elements.stepChat.classList.remove('active');
+      elements.stepEmailCall.classList.remove('active');
+      elements.modalTitle.textContent = 'Support Center';
+      elements.contactMethodButtons.forEach(b => b.classList.remove('selected'));
+      state.selectedContactMethod = null;
     }
 
     function resetToContactSelection() {
       showContactMethodSelection();
-      if (ws) {
-        ws.close();
-        ws = null;
+      if (state.ws) {
+        state.ws.close();
+        state.ws = null;
       }
+    }
+
+    // Utility Functions
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
     }
   }
 })();
